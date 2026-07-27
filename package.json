@@ -1,6 +1,6 @@
 {
   "name": "bible-style-translator",
-  "version": "1.1.2",
+  "version": "1.1.3",
   "description": "保留任意现代中文文案的原意与结构，将其改写成故意庄严过度的和合本翻译腔。",
   "type": "module",
   "main": "desktop/main.cjs",

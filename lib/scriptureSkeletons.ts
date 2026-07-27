@@ -1271,6 +1271,8 @@ function extractStoryNames(source: string) {
     const name = match[1].replace(/(?:摇头|点头|看完后|下班|转身|起身)$/u, "");
     const isClauseFragment =
       /^(?:把|被|从|向|在|于|将|使|让|给|对|同|与|和|若|如果|因为|所以|为了|当|及至|到了|有些|有的|这些|那些|这个|那个|其中|于是|随后|后来|就|便|又|却|仍|并|而|但|惟有|只有)/u.test(name) ||
+      /^(?:不|未|没有|冒着|作为|她为|他为|我为|你为|人们|众人)/u.test(name) ||
+      /(?:风险|现实|生活|成长|起名|相称|时候|事情|结果)$/u.test(name) ||
       /(?:昨日|今日|明日|当天|当时|以前|以后|最后|已经|仍然|虽然|忽然|立即|重新|终于|一同|各自|逐项|这些|那些)/u.test(name);
     if (
       !isClauseFragment &&
@@ -1438,6 +1440,7 @@ function reflectionSemanticIssues(reflection: ScriptureReflection, source: strin
     time_and_season: /时候|时辰|日期|期限|清晨|晚上|午后|第二天|等待|按时/u,
     speech_truth: /说|回答|承认|实话|诚实|真相|谎言|隐瞒|应允|否认/u,
     loss_and_gain: /舍弃|放下|失去|牺牲|让出|拒绝所得|不求回报|保全/u,
+    inherited_responsibility: /家族|祖先|父辈|母辈|后代|孩子|儿子|女儿|血脉|罪孽|担当/u,
     parallel: /如同|好像|一样|仿佛|两地|两处|彼此相应/u,
   };
   const requiredEvidence = relationEvidence[reflection.relation];
@@ -1445,6 +1448,41 @@ function reflectionSemanticIssues(reflection: ScriptureReflection, source: strin
     issues.push(`故事判词的 ${reflection.relation} 关系与具体行为、结果不相称`);
   }
   return [...new Set(issues)];
+}
+
+function inheritedResponsibilityReflection(
+  source: string,
+): ScriptureReflection | undefined {
+  const hasInheritedEvil =
+    /家族|祖先|父辈|母辈|血脉|世代/u.test(source) &&
+    /献祭|罪孽|罪责|恶魔|邪恶|恶行|过犯/u.test(source);
+  const hasInnocentDescendant =
+    /孩子|婴儿|儿子|女儿|后代/u.test(source) &&
+    /纯洁|无辜|清白|不是恶魔|不担当|不应承担|并非.*罪/u.test(source);
+  if (!hasInheritedEvil || !hasInnocentDescendant) return undefined;
+
+  const evidence = source
+    .split(/[。！？!?]/u)
+    .map((item) => item.trim())
+    .filter(
+      (item) =>
+        item &&
+        (/(?:孩子|婴儿|儿子|女儿|后代).{0,60}(?:纯洁|无辜|清白|不是恶魔|不担当|不应承担)/u.test(item) ||
+          /(?:纯洁|无辜|清白|不是恶魔|不担当|不应承担).{0,60}(?:孩子|婴儿|儿子|女儿|后代)/u.test(item)),
+    )
+    .slice(0, 2);
+  return {
+    enabled: true,
+    mode: "neutral",
+    actor: /瑞斯/u.test(source) ? "瑞斯" : "那孩子",
+    behavior: "虽出自背负旧罪的家族，却有清白的灵魂",
+    outcome: /健康.{0,4}长大/u.test(source)
+      ? "离开家族以后健康长大"
+      : "不曾担当家族的旧罪",
+    relation: "inherited_responsibility",
+    polarity: "neutral",
+    evidence: evidence.length ? evidence : [source.slice(0, 140)],
+  };
 }
 
 /**
@@ -1586,12 +1624,13 @@ export function groundScriptureSkeletonPlan(plan: ScriptureSkeletonPlan, source:
   }
 
   const proposedReflection = plan.reflection ?? legacyReflection;
-  const reflection = proposedReflection && (
+  const inheritedReflection = inheritedResponsibilityReflection(source);
+  const reflection = inheritedReflection ?? (proposedReflection && (
     proposedReflection === legacyReflection ||
     reflectionSemanticIssues(proposedReflection, source).length === 0
   )
     ? proposedReflection
-    : undefined;
+    : undefined);
   return { ...plan, units, reflection };
 }
 
@@ -1782,7 +1821,11 @@ function renderPlanClosure(plan: ScriptureSkeletonPlan, source = "") {
   return "";
 }
 
-export function renderScriptureSkeletonPlan(plan: ScriptureSkeletonPlan, source = "") {
+export function renderScriptureSkeletonPlan(
+  plan: ScriptureSkeletonPlan,
+  source = "",
+  options: { includeReflection?: boolean } = {},
+) {
   if (source && classifyScriptureSource(source) === "aphorism") {
     const recognizable = renderRecognizableSourceAphorism(source);
     if (recognizable) return recognizable;
@@ -1863,7 +1906,9 @@ export function renderScriptureSkeletonPlan(plan: ScriptureSkeletonPlan, source 
     previousUnit = unit;
   }
 
-  const closure = renderPlanClosure(plan, source);
+  const closure = options.includeReflection === false
+    ? ""
+    : renderPlanClosure(plan, source);
   if (closure && !renderedUnits.at(-1)?.endsWith(closure)) renderedUnits.push(closure);
 
   const paragraphs: string[] = [];
@@ -1877,11 +1922,13 @@ export function renderScriptureSkeletonPlan(plan: ScriptureSkeletonPlan, source 
   if (current) paragraphs.push(current);
   const body = paragraphs.join("\n\n").trim();
   const isStory = source && classifyScriptureSource(source) === "story";
-  const reflection = isStory && plan.reflection?.enabled
-    ? renderStoryReflection(plan.reflection)
-    : isStory && !/这事的结局，就是这样。$/u.test(body)
-      ? renderNeutralStoryClosure()
-      : "";
+  const reflection = options.includeReflection === false
+    ? ""
+    : isStory && plan.reflection?.enabled
+      ? renderStoryReflection(plan.reflection)
+      : isStory && !/这事的结局，就是这样。$/u.test(body)
+        ? renderNeutralStoryClosure()
+        : "";
   return reflection ? `${body}\n\n${reflection}` : body;
 }
 
@@ -2030,7 +2077,7 @@ ${planningLengthRule(level, sourceLength)}
     "actor": "被评价的人物",
     "behavior": "原文支持的具体行为或选择",
     "outcome": "原文已经发生的直接结果",
-    "relation": "parallel/value_comparison/effort_harvest/cause_result/character_fruit/self_exaltation/care_for_others/small_faithfulness/anger_warning/time_and_season/speech_truth/loss_and_gain/neutral_record",
+    "relation": "parallel/value_comparison/effort_harvest/cause_result/character_fruit/self_exaltation/care_for_others/small_faithfulness/anger_warning/time_and_season/speech_truth/loss_and_gain/inherited_responsibility/neutral_record",
     "polarity": "positive/negative/mixed/neutral",
     "evidence": ["逐字摘录的原文片段"]
   }
@@ -2057,8 +2104,8 @@ ${relevantStoryIntentGuide(source)}
 13. 每一个保留的 speech 都只填一个清楚的发言功能；可以改变表面说法以适配固定圣经骨架，但不得把劝诫交给辩护者、把拒绝者写成应允者、把威胁者和被威胁者调换。
 14. 只有原文确实对行为、品格、选择与后果作普遍判断时，才把没有对白的短文写成“格言”或“观点”，并使用 general_rule(category,result) 或 contrast(rejected,asserted)。不能因为输入只有一句话就判定为格言。category 只填最核心的行为、品格或处境，result 只填原文已有的后果，不得把“凡、必、有福、乃是”等骨架词塞入元素。
 15. 格言必须保持原文的褒贬和因果方向：值得鼓励的行为配正面结果，应当禁止的行为配负面后果；不得把“不离开朋友、诚实、忍耐”等善行整理成应当禁止之事，也不得把“贪图捷径、欺骗、骄傲”等恶行整理成应当持守之事。category 与 result 都要写成独立、明确、没有双重否定的短语。格言最终应像一节真实经文：短促、完整、通常只有一至两个分句；只靠拢一个最合适的著名句式，不得把几处经文拼成解释段落。
-16. 每一篇人物故事都必须填写且只填写一个顶层 reflection；故事的 units 中不得再建立 general_rule。AI 只提取语义，不得选择、拼接或仿写经文。actor 填被评价的人物；behavior 填原文中的具体行为；outcome 填原文已经发生的直接结果；relation 只描述二者的逻辑形状；evidence 必须逐字复制原文一至三处。先比较全篇关键转折，只选最能概括主旨的一项。出现钱不等于贪财，出现争执不等于骄傲，失败不等于懒惰，收礼不等于贪婪，拒绝危险要求不等于悖逆，受害者不可被判为有错；原文没有结果时不得写“必得、必败、必受报应”。若没有安全、明确的寓意，mode、relation、polarity 分别填 neutral、neutral_record、neutral，并只概括真实经过。非故事输入一律填写 enabled:false，其他字段留空。
-    relation 必须按逻辑而非关键词选择：长期劳苦、坚持或反复作工才用 effort_harvest；帮助、照顾、扶持他人才用 care_for_others；诚实、守信、归还、拒收酬谢而得到称赞可用 value_comparison 或 small_faithfulness；明确自高才用 self_exaltation；明确发怒、威胁、伤害才用 anger_warning；言语真伪才用 speech_truth；舍弃与所得才用 loss_and_gain；日期、期限和等待才用 time_and_season；普通行为导致实际结果优先用 cause_result，不能为了套名句夸大行为。
+16. 每一篇人物故事都必须填写且只填写一个顶层 reflection；故事的 units 中不得再建立 general_rule。AI 只提取语义，不得选择、拼接或仿写经文。actor 填被评价的人物；behavior 填原文中的具体行为；outcome 填原文已经发生的直接结果；relation 只描述二者的逻辑形状；evidence 必须逐字复制原文一至三处。先比较全篇关键转折，只选最能概括主旨的一项。出现钱不等于贪财，出现争执不等于骄傲，失败不等于懒惰，收礼不等于贪婪，拒绝危险要求不等于悖逆，受害者不可被判为有错；原文没有结果时不得写“必得、必败、必受报应”。若故事明确讨论家族、祖先或父辈的罪责是否应由无辜孩子、儿女或后代承担，使用 inherited_responsibility；不可只因出现亲属关系便使用。若没有安全、明确的寓意，mode、relation、polarity 分别填 neutral、neutral_record、neutral，并只概括真实经过。非故事输入一律填写 enabled:false，其他字段留空。
+    relation 必须按逻辑而非关键词选择：长期劳苦、坚持或反复作工才用 effort_harvest；帮助、照顾、扶持他人才用 care_for_others；诚实、守信、归还、拒收酬谢而得到称赞可用 value_comparison 或 small_faithfulness；明确自高才用 self_exaltation；明确发怒、威胁、伤害才用 anger_warning；言语真伪才用 speech_truth；舍弃与所得才用 loss_and_gain；日期、期限和等待才用 time_and_season；家族旧罪与无辜后代是否应彼此担当才用 inherited_responsibility；普通行为导致实际结果优先用 cause_result，不能为了套名句夸大行为。
 17. 定义句和知识说明若出现“是、指、称为、以……为……、由……组成、包括、属于、用于、标准、规范”等结构，textType 必须写“定义”或“知识说明”，并使用 definition(subject,name,details) 或 factual_statement(subject,fact,more)。details 必须保留“以甲为乙”等关系及被定义名称，不得使用 general_rule，也不得添加“有福、有祸、凡、必、刑罚、审判”。
 18. 只输出 JSON，不输出 Markdown。
 19. 帮助类对白必须把双方动作拆清：recipientAction 填受帮助者先去做的事，action 填说话者答应代办的事。例如“你先照顾病人，我替你送东西”应分别填“回去照顾病人”和“把东西送到指定地方”，不得压缩成空泛的“有什么事只管说”。礼物情节必须确认谁带来、谁收下；“甲带礼物来，乙只收一件”中，courtesy_gift 的 speaker 只能是甲，乙的收取应写 narration，不得让乙说“我把礼物给你”。间接说明疾病、送药、欠款、目的和原因时，使用 indirect_speech.matter 完整保留这些关系。

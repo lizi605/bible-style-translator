@@ -18,13 +18,16 @@ import {
   buildPlainPrompt,
   buildScripturePrompt,
   buildScriptureReplacementPrompt,
+  buildStructuredStoryRealizationPrompt,
   PLAIN_SYSTEM_PROMPT,
   SCRIPTURE_REPLACEMENT_SYSTEM_PROMPT,
   SCRIPTURE_SYSTEM_PROMPT,
+  STRUCTURED_STORY_REALIZATION_SYSTEM_PROMPT,
   scriptureModeInstructions,
   type ScriptureMode,
 } from "../lib/prompt";
 import {
+  assessUnionStyleResult,
   findContradictoryDialogueAnchors,
   findGenericClassicalCliches,
   findLowRetentionUnionDialogues,
@@ -48,6 +51,10 @@ import {
   SONG_TIGER_REGRESSED_OUTPUT,
   SONG_TIGER_STYLE_RECOVERY_SAMPLE,
 } from "./fixtures/song-tiger-regressed";
+import {
+  RUIS_STORY_INPUT,
+  RUIS_STORY_TARGET,
+} from "./fixtures/ruis-story";
 
 const modes: ScriptureMode[] = [
   "original",
@@ -67,6 +74,27 @@ test("original mode gives Union Version style priority over source wording", () 
   assert.match(prompt, /原文的对白轮次、句序、寒暄和次要细节可以大胆合并、调序或舍弃/);
   assert.match(prompt, /普通句子和人物台词必须重新组织/);
   assert.match(prompt, /连续四个以上普通汉字不得原样连续出现/);
+});
+
+test("structured story realization rejects a numbered modern synopsis", () => {
+  const modernSynopsis = RUIS_STORY_INPUT;
+  assert.equal(
+    assessUnionStyleResult(RUIS_STORY_INPUT, modernSynopsis).acceptable,
+    false,
+  );
+  assert.equal(
+    assessUnionStyleResult(RUIS_STORY_INPUT, RUIS_STORY_TARGET).acceptable,
+    true,
+  );
+  assert.match(STRUCTURED_STORY_REALIZATION_SYSTEM_PROMPT, /不得把人物简介、百科设定/u);
+  assert.match(
+    buildStructuredStoryRealizationPrompt(
+      RUIS_STORY_INPUT,
+      modernSynopsis,
+      "目标篇幅接近原文。",
+    ),
+    /可信事实草稿/u,
+  );
 });
 
 test("original mode may rewrite around the plot spine instead of translating line by line", () => {
@@ -643,6 +671,34 @@ test("facts, uncertainty, and modern terms remain protected", () => {
   ]) {
     assert.match(SCRIPTURE_SYSTEM_PROMPT, pattern);
   }
+});
+
+test("structured story realization biblicalizes modern eras, places, venues, and exposition", () => {
+  const source =
+    "中世纪英格兰的欧姆伯尔家族延续到二十世纪。瑞斯在艾因赫文市经营酒吧，心理阴霾使他的成长受到阻碍。";
+  const prompt = buildStructuredStoryRealizationPrompt(
+    source,
+    "欧姆伯尔家族来自中世纪英格兰，延续到二十世纪；瑞斯在艾因赫文市经营酒吧，因姐姐去世而悲伤。",
+    "写成中篇。",
+  );
+
+  for (const phrase of [
+    "世代相传，及至第二十个百年",
+    "英格兰地",
+    "艾因赫文城",
+    "卖酒的屋",
+    "不肯受安慰",
+  ]) {
+    assert.match(prompt, new RegExp(phrase));
+  }
+
+  const regressed =
+    "中世纪英格兰的这个家族延续到二十世纪。瑞斯在艾因赫文市经营酒吧，心理阴霾成为成长的阻碍。";
+  const recast =
+    "古时，在英格兰地有一宗族；这事世代相传，及至第二十个百年，仍未止息。瑞斯往艾因赫文城去，在一间卖酒的屋里作工。姐姐死后，他不肯受安慰。";
+  assert.ok(findUnrecastCuvLexiconItems(source, regressed).length >= 4);
+  assert.deepEqual(findUnrecastCuvLexiconItems(source, recast), []);
+  assert.equal(assessUnionStyleResult(source, regressed).acceptable, false);
 });
 
 test("length levels keep stylistic recasting concise", () => {

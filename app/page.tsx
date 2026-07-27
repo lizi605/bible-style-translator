@@ -17,7 +17,11 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { buildCardDownloadFilename } from "@/lib/cardDownload";
+import {
+  buildCardDownloadFilename,
+  wrapMeasuredCardText,
+} from "@/lib/cardDownload";
+import packageInfo from "@/package.json";
 import {
   formatScriptureVerses,
   type ScriptureVerse,
@@ -124,26 +128,11 @@ function wrapCanvasText(
   text: string,
   maxWidth: number,
 ) {
-  const paragraphs = text.split(/\n+/);
-  const lines: string[] = [];
-  for (const paragraph of paragraphs) {
-    if (!paragraph) {
-      lines.push("");
-      continue;
-    }
-    let line = "";
-    for (const character of paragraph) {
-      const candidate = line + character;
-      if (context.measureText(candidate).width > maxWidth && line) {
-        lines.push(line);
-        line = character;
-      } else {
-        line = candidate;
-      }
-    }
-    if (line) lines.push(line);
-  }
-  return lines;
+  return wrapMeasuredCardText(
+    text,
+    maxWidth,
+    (value) => context.measureText(value).width,
+  );
 }
 
 export default function Home() {
@@ -407,7 +396,7 @@ export default function Home() {
     context.fillText("《圣经》文体翻译器", 110, 125);
     context.fillStyle = "#2e6695";
     context.font = '24px "Noto Serif SC", "Songti SC", serif';
-    context.fillText(resultMeta, 112, 171);
+    context.fillText(`${resultMeta} · v${packageInfo.version}`, 112, 171);
     context.fillRect(110, 194, 980, 2);
 
     context.fillStyle = "#202936";
@@ -686,7 +675,7 @@ export default function Home() {
       <footer className="site-footer">
         <div>
           <strong>《圣经》文体翻译器</strong>
-          <span>BYOK · Next.js · DeepSeek</span>
+          <span>v{packageInfo.version} · BYOK · Next.js · DeepSeek</span>
         </div>
         <p>
           技术骨架复刻自

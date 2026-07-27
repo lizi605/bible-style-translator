@@ -399,6 +399,57 @@ export function requiredUnionStyleSectionCoverage(source: string) {
   return 3;
 }
 
+export type UnionStyleAssessment = {
+  acceptable: boolean;
+  score: number;
+  requiredScore: number;
+  sectionCoverage: number;
+  requiredSectionCoverage: number;
+  issues: string[];
+};
+
+/**
+ * Fact preservation and scripture cadence are separate product requirements.
+ * A draft that keeps every name but merely adds “那时、于是” once must not be
+ * accepted as a finished Union Version imitation.
+ */
+export function assessUnionStyleResult(
+  source: string,
+  output: string,
+): UnionStyleAssessment {
+  const score = unionStyleScore(output);
+  const requiredScore = requiredUnionStyleScore(source);
+  const sectionCoverage = unionStyleSectionCoverage(output);
+  const requiredSectionCoverage = requiredUnionStyleSectionCoverage(source);
+  const issues: string[] = [];
+
+  if (score < requiredScore) {
+    issues.push(`和合本句法不足：当前 ${score}，至少需要 ${requiredScore}`);
+  }
+  if (sectionCoverage < requiredSectionCoverage) {
+    issues.push(
+      `和合本风格分布不足：当前覆盖 ${sectionCoverage} 段，至少需要 ${requiredSectionCoverage} 段`,
+    );
+  }
+  const classical = findGenericClassicalCliches(output);
+  if (classical.length) {
+    issues.push(`仍有普通文言或章回套语：${classical.slice(0, 3).join("、")}`);
+  }
+  const unrecast = findUnrecastCuvLexiconItems(source, output);
+  if (unrecast.length) {
+    issues.push(`现代叙述元素尚未圣经化：${unrecast.slice(0, 4).join("、")}`);
+  }
+
+  return {
+    acceptable: issues.length === 0,
+    score,
+    requiredScore,
+    sectionCoverage,
+    requiredSectionCoverage,
+    issues,
+  };
+}
+
 const GENERIC_CLASSICAL_CLICHES = [
   /说时迟[，,]?那时快/u,
   /名不虚传/u,

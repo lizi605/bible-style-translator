@@ -22,7 +22,7 @@ test("page presents the general Union Version transformer", async () => {
   assert.match(page, /不是《圣经》经文、经文翻译或宗教权威文本/);
 });
 
-test("route uses bounded element recognition and deterministic skeleton rendering", async () => {
+test("route uses bounded fact planning followed by scripture-style realization", async () => {
   const route = await readFile(path.join(root, "app/api/translate/route.ts"), "utf8");
   assert.match(route, /authorization/);
   assert.doesNotMatch(route, /process\.env\.DEEPSEEK_API_KEY/);
@@ -35,6 +35,9 @@ test("route uses bounded element recognition and deterministic skeleton renderin
   assert.match(route, /response_format/);
   assert.match(route, /groundScriptureSkeletonPlan\(parsedPlan, text\)[\s\S]*assessScriptureStoryPlan\(groundedPlan, text\)/);
   assert.match(route, /assessScriptureStoryResult/);
+  assert.match(route, /STRUCTURED_STORY_REALIZATION_SYSTEM_PROMPT/);
+  assert.match(route, /buildStructuredStoryRealizationPrompt/);
+  assert.match(route, /assessUnionStyleResult/);
   assert.match(route, /previousIssues/);
   assert.match(route, /temperature: 0\.05/);
   assert.doesNotMatch(route, /repairScriptureResult/);

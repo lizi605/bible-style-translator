@@ -4,17 +4,22 @@ import {
   buildEditionPrompt,
   buildPlainPrompt,
   buildScripturePrompt,
+  buildStructuredStoryRealizationPrompt,
   KJV_SYSTEM_PROMPT,
   PLAIN_SYSTEM_PROMPT,
   SCRIPTURE_SYSTEM_PROMPT,
   SIGAO_SYSTEM_PROMPT,
+  STRUCTURED_STORY_REALIZATION_SYSTEM_PROMPT,
   type PlainMode,
   type ScriptureDirection,
   type ScriptureEdition,
   type ScriptureLevel,
   type ScriptureMode,
 } from "@/lib/prompt";
-import { normalizeUnionNarration } from "@/lib/scriptureQuality";
+import {
+  assessUnionStyleResult,
+  normalizeUnionNarration,
+} from "@/lib/scriptureQuality";
 import {
   classifyScriptureSource,
   definitionTermsArePreserved,
@@ -29,7 +34,12 @@ import {
   groundScriptureSkeletonPlan,
   parseScriptureSkeletonPlan,
   renderScriptureSkeletonPlan,
+  type ScriptureSkeletonPlan,
 } from "@/lib/scriptureSkeletons";
+import {
+  renderNeutralStoryClosure,
+  renderStoryReflection,
+} from "@/lib/scriptureReflections";
 import { segmentScriptureText } from "@/lib/scriptureVerses";
 import { renderRecognizableSourceAphorism } from "@/lib/cuvAphorismSkeletons";
 import {
@@ -525,6 +535,36 @@ function shouldExposeUpstreamError(error: unknown) {
   return [400, 401, 402, 403, 404, 422, 429].includes(errorStatus(error));
 }
 
+function storyClosure(plan: ScriptureSkeletonPlan) {
+  return plan.reflection?.enabled
+    ? renderStoryReflection(plan.reflection)
+    : renderNeutralStoryClosure();
+}
+
+function stripGeneratedStoryClosure(value: string) {
+  return value
+    .trim()
+    .replace(
+      /(?:\n+|^)(?:这事的结局，就是这样。|所记的事，就是这些。|这事就这样成了。)\s*$/u,
+      "",
+    )
+    .trim();
+}
+
+function attachStoryClosure(value: string, plan: ScriptureSkeletonPlan) {
+  const body = stripGeneratedStoryClosure(value);
+  const closure = storyClosure(plan);
+  if (!closure || body.endsWith(closure)) return body;
+  return `${body}\n\n${closure}`;
+}
+
+function minimumStoryFactScore(source: string, level: ScriptureLevel) {
+  const length = [...source].length;
+  if (length >= 350) return 0;
+  if (length >= 220) return level === "light" ? 0.34 : 0.4;
+  return 0.58;
+}
+
 export async function POST(request: NextRequest) {
   const apiKey = getUserApiKey(request);
   if (!apiKey || apiKey.length < 20 || /\s/.test(apiKey)) {
@@ -605,11 +645,11 @@ export async function POST(request: NextRequest) {
     ? Math.min(Math.max(configuredMax, 512), 4096)
     : 4096;
   const configuredBudget = Number(
-    process.env.TRANSLATE_TIME_BUDGET_MS || "45000",
+    process.env.TRANSLATE_TIME_BUDGET_MS || "60000",
   );
   const budgetMs = Number.isFinite(configuredBudget)
     ? Math.min(Math.max(configuredBudget, 30000), 90000)
-    : 45000;
+    : 60000;
   const deadlineAt = Date.now() + budgetMs;
 
   try {
@@ -656,15 +696,18 @@ export async function POST(request: NextRequest) {
     }
 
     if (edition === "cuv" && mode === "original") {
-      let plan = null;
-      let bestPlan = null;
+      let plan: ScriptureSkeletonPlan | null = null;
+      let bestPlan: ScriptureSkeletonPlan | null = null;
       let bestScore = -1;
-      let bestIssues: string[] = [];
       let bestAttempt = 0;
       let previousIssues: string[] = [];
+      let rescueResult = "";
+      let rescueIssues: string[] = [];
+      let rescueScore = Number.NEGATIVE_INFINITY;
+      let realizationIssues: string[] = [];
       const generationDiagnostics: Array<Record<string, unknown>> = [];
       const includeDiagnostics = process.env.TRANSLATION_DEBUG === "1";
-      for (let attempt = 0; attempt < 2 && Date.now() < deadlineAt - 4500; attempt += 1) {
+      for (let attempt = 0; attempt < 2 && Date.now() < deadlineAt - 18000; attempt += 1) {
         try {
           const rawPlan = await callCompatibleModel({
             apiKey,
@@ -730,12 +773,10 @@ export async function POST(request: NextRequest) {
           if (assessment.critical.length === 0 && assessment.score > bestScore) {
             bestScore = assessment.score;
             bestPlan = groundedPlan;
-            bestIssues = assessment.issues;
             bestAttempt = attempt;
           }
           if (assessment.acceptable) {
             plan = groundedPlan;
-            bestIssues = assessment.issues;
             bestAttempt = attempt;
             break;
           }
@@ -762,26 +803,113 @@ export async function POST(request: NextRequest) {
 
       plan ??= bestPlan;
 
-      if (plan) {
+      if (plan && sourceGenre !== "story") {
         const rendered = renderScriptureSkeletonPlan(plan, text);
-        const warning = bestIssues.length
-          ? "正文已经生成；系统保留了事实正确的最佳版本，个别篇幅或风格指标可能未完全达到目标。"
-          : undefined;
         return NextResponse.json({
-          ...scriptureResponse(
-            text,
-            rendered,
-            edition,
-            bestAttempt > 0 ? "auto_repaired" : warning ? "best_effort" : "structured",
-            warning,
-          ),
+          ...scriptureResponse(text, rendered, edition, "structured"),
           ...(includeDiagnostics ? { diagnostics: generationDiagnostics } : {}),
         });
       }
 
-      let rescueResult = "";
-      let rescueIssues: string[] = [];
-      let rescueScore = Number.NEGATIVE_INFINITY;
+      if (plan && Date.now() < deadlineAt - 8000) {
+        const factDraft = renderScriptureSkeletonPlan(plan, text, {
+          includeReflection: false,
+        });
+        try {
+          const realizedBody = await callCompatibleModel({
+            apiKey,
+            model: requestedModel || undefined,
+            deadlineAt,
+            systemPrompt: STRUCTURED_STORY_REALIZATION_SYSTEM_PROMPT,
+            userPrompt: buildStructuredStoryRealizationPrompt(
+              text,
+              factDraft,
+              buildLengthInstruction(lengthTarget, level),
+              variation,
+            ),
+            maxTokens: Math.min(
+              maxTokens,
+              Math.max(1200, structureTokenBudget(text, sourceGenre, level) + 500),
+            ),
+            temperature: 0.38,
+            callTimeoutMs: Math.max(
+              8000,
+              Math.min(24000, deadlineAt - Date.now() - 1500),
+            ),
+          });
+          const realized = attachStoryClosure(realizedBody, plan);
+          const resultAssessment = assessScriptureStoryResult(text, realized);
+          const lengthAssessment = assessScriptureLength(
+            realized,
+            lengthTarget,
+            edition,
+          );
+          const styleAssessment = assessUnionStyleResult(text, realized);
+          const allIssues = [
+            ...resultAssessment.issues,
+            ...styleAssessment.issues,
+            ...(lengthAssessment.acceptable ? [] : [lengthAssessment.issue]),
+          ];
+          const { critical } = splitStoryIssues(
+            resultAssessment.issues,
+            text,
+            level,
+          );
+          const factuallySafe =
+            critical.length === 0 &&
+            resultAssessment.score >= minimumStoryFactScore(text, level);
+          const score =
+            resultAssessment.score * 4 +
+            styleAssessment.score * 0.16 +
+            styleAssessment.sectionCoverage * 0.24 -
+            Math.abs(lengthAssessment.actual - lengthTarget.ideal) / 1000;
+          realizationIssues = allIssues;
+
+          if (includeDiagnostics) {
+            generationDiagnostics.push({
+              stage: "structured_realization_assessed",
+              outputLength: [...realized].length,
+              styleScore: styleAssessment.score,
+              styleRequired: styleAssessment.requiredScore,
+              styleSections: styleAssessment.sectionCoverage,
+              styleSectionsRequired: styleAssessment.requiredSectionCoverage,
+              critical,
+              issues: allIssues,
+            });
+          }
+
+          if (factuallySafe && styleAssessment.acceptable && score > rescueScore) {
+            rescueScore = score;
+            rescueResult = realized;
+            rescueIssues = allIssues;
+          }
+          if (
+            factuallySafe &&
+            styleAssessment.acceptable &&
+            lengthAssessment.acceptable
+          ) {
+            return NextResponse.json({
+              ...scriptureResponse(
+                text,
+                realized,
+                edition,
+                bestAttempt > 0 ? "auto_repaired" : "structured",
+              ),
+              ...(includeDiagnostics ? { diagnostics: generationDiagnostics } : {}),
+            });
+          }
+        } catch (error) {
+          if (shouldExposeUpstreamError(error)) throw error;
+          realizationIssues = ["结构事实已经提取，但和合本成文步骤中断"];
+          if (includeDiagnostics) {
+            generationDiagnostics.push({
+              stage: "structured_realization_failed",
+              name: error instanceof Error ? error.name : "unknown",
+              message: error instanceof Error ? error.message : "unknown",
+            });
+          }
+        }
+      }
 
       for (
         let attempt = 0;
@@ -789,12 +917,18 @@ export async function POST(request: NextRequest) {
         attempt += 1
       ) {
         try {
-          const generated = await callCompatibleModel({
+          const generatedBody = await callCompatibleModel({
             apiKey,
             model: requestedModel || undefined,
             deadlineAt,
             systemPrompt: SCRIPTURE_SYSTEM_PROMPT,
-            userPrompt: `${buildScripturePrompt(text, mode, level)}\n\n${buildLengthInstruction(lengthTarget, level)}`,
+            userPrompt: `${buildScripturePrompt(text, mode, level)}\n\n${buildLengthInstruction(lengthTarget, level)}${
+              realizationIssues.length
+                ? `\n\n上一稿未通过以下检查：\n- ${realizationIssues
+                    .slice(0, 6)
+                    .join("\n- ")}\n必须重新成文，不可返回现代叙述梗概。`
+                : ""
+            }`,
             maxTokens: Math.min(
               maxTokens,
               Math.max(1200, structureTokenBudget(text, sourceGenre, level) + 700),
@@ -805,37 +939,58 @@ export async function POST(request: NextRequest) {
               Math.min(24000, deadlineAt - Date.now() - 1000),
             ),
           });
+          const generated = plan
+            ? attachStoryClosure(generatedBody, plan)
+            : generatedBody;
           const resultAssessment = assessScriptureStoryResult(text, generated);
           const lengthAssessment = assessScriptureLength(
             generated,
             lengthTarget,
             edition,
           );
+          const styleAssessment = assessUnionStyleResult(text, generated);
           const allIssues = [
             ...resultAssessment.issues,
+            ...styleAssessment.issues,
             ...(lengthAssessment.acceptable ? [] : [lengthAssessment.issue]),
           ];
-          const { critical } = splitStoryIssues(allIssues, text, level);
+          const { critical } = splitStoryIssues(
+            resultAssessment.issues,
+            text,
+            level,
+          );
           const score =
-            resultAssessment.score -
+            resultAssessment.score * 4 +
+            styleAssessment.score * 0.16 +
+            styleAssessment.sectionCoverage * 0.24 -
             critical.length * 2 -
             Math.abs(lengthAssessment.actual - lengthTarget.ideal) / 1000;
-          const factuallySafe = critical.length === 0 && resultAssessment.score >= 0.58;
+          const factuallySafe =
+            critical.length === 0 &&
+            resultAssessment.score >= minimumStoryFactScore(text, level);
           if (includeDiagnostics) {
             generationDiagnostics.push({
               attempt,
               stage: "direct_rescue_assessed",
               outputLength: [...generated].length,
+              styleScore: styleAssessment.score,
+              styleRequired: styleAssessment.requiredScore,
+              styleSections: styleAssessment.sectionCoverage,
+              styleSectionsRequired: styleAssessment.requiredSectionCoverage,
               critical,
               issues: allIssues,
             });
           }
-          if (factuallySafe && score > rescueScore) {
+          if (factuallySafe && styleAssessment.acceptable && score > rescueScore) {
             rescueScore = score;
             rescueResult = generated;
             rescueIssues = allIssues;
           }
-          if (factuallySafe && lengthAssessment.acceptable) {
+          if (
+            factuallySafe &&
+            styleAssessment.acceptable &&
+            lengthAssessment.acceptable
+          ) {
             return NextResponse.json({
               ...scriptureResponse(
                 text,

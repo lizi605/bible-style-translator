@@ -4,6 +4,10 @@ import { NextRequest } from "next/server";
 import { POST } from "../app/api/translate/route.ts";
 import { assessScriptureStoryResult } from "../lib/scriptureSkeletons.ts";
 import { splitStoryIssues } from "../lib/storyIssueSeverity.ts";
+import {
+  RUIS_STORY_INPUT,
+  RUIS_STORY_TARGET,
+} from "./fixtures/ruis-story.ts";
 
 const originalFetch = globalThis.fetch;
 
@@ -71,13 +75,28 @@ test("long-story name extraction ignores clause fragments", () => {
   assert.ok(!omittedNames.some((issue) => /把昨日|有些人虽然|就把这些|主管最后查/u.test(issue)));
 });
 
+test("rewritten long stories may change wording while retaining decisive facts", () => {
+  const assessment = assessScriptureStoryResult(
+    RUIS_STORY_INPUT,
+    RUIS_STORY_TARGET,
+  );
+  const split = splitStoryIssues(
+    assessment.issues,
+    RUIS_STORY_INPUT,
+    "standard",
+  );
+  assert.deepEqual(split.critical, []);
+  assert.ok(!assessment.issues.some((issue) => /不爱|冒着风险|她为他起名/u.test(issue)));
+});
+
 test("CUV structured calls request strict JSON and return generation metadata", async (context) => {
   context.after(() => {
     globalThis.fetch = originalFetch;
   });
-  let upstreamBody: Record<string, unknown> | undefined;
+  const upstreamBodies: Array<Record<string, unknown>> = [];
   globalThis.fetch = async (_input, init) => {
-    upstreamBody = JSON.parse(String(init?.body));
+    const upstreamBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    upstreamBodies.push(upstreamBody);
     const plan = {
       textType: "记事",
       units: [
@@ -92,10 +111,22 @@ test("CUV structured calls request strict JSON and return generation metadata", 
         },
         { kind: "narration", frame: "outcome", actor: "小周", action: "答应并回到座位修改", result: "继续修改方案" },
       ],
-      reflection: { enabled: false },
+      reflection: {
+        enabled: true,
+        mode: "commend",
+        actor: "小周",
+        behavior: "答应以后回到座位修改",
+        outcome: "继续修改方案",
+        relation: "cause_result",
+        polarity: "positive",
+        evidence: ["小周答应以后回到座位修改"],
+      },
     };
+    const content = upstreamBodies.length === 1
+      ? JSON.stringify(plan)
+      : "那时，小周来到办公室，将方案交在主管面前。主管看见，就吩咐他说：“你当在明日重新修改；不可将旧样交来。”这事以后，小周听见这话，于是就应允，回到座位继续修改方案。";
     return new Response(
-      JSON.stringify({ choices: [{ message: { content: JSON.stringify(plan) } }] }),
+      JSON.stringify({ choices: [{ message: { content } }] }),
       { status: 200, headers: { "content-type": "application/json" } },
     );
   };
@@ -114,11 +145,14 @@ test("CUV structured calls request strict JSON and return generation metadata", 
     ),
   );
   const payload = await response.json();
-  assert.equal(response.status, 200);
+  assert.equal(response.status, 200, JSON.stringify(payload));
   assert.ok(payload.result);
   assert.ok(payload.generationMode);
-  assert.deepEqual(upstreamBody?.response_format, { type: "json_object" });
-  assert.deepEqual(upstreamBody?.thinking, { type: "disabled" });
+  assert.equal(upstreamBodies.length, 2);
+  assert.deepEqual(upstreamBodies[0]?.response_format, { type: "json_object" });
+  assert.deepEqual(upstreamBodies[0]?.thinking, { type: "disabled" });
+  assert.equal(upstreamBodies[1]?.response_format, undefined);
+  assert.match(payload.result, /这事以后/);
 });
 
 test("malformed CUV structure output is rescued by direct generation", async (context) => {
@@ -131,7 +165,7 @@ test("malformed CUV structure output is rescued by direct generation", async (co
     bodies.push(body);
     const content = bodies.length <= 2
       ? '{"textType":"记事","units":[ Broken JSON'
-      : "那时，小周来到办公室，将方案交在主管面前。主管看后对他说：“你当重新修改，明日再交来。”小周就应允，回到座位修改。";
+      : "那时，小周来到办公室，将方案交在主管面前。主管看见这事，就对他说：“你当在明日重新修改；不可将旧样交来。”这事以后，小周听见这话，就应允，回到座位继续修改，好叫方案得以完成。";
     return new Response(
       JSON.stringify({ choices: [{ message: { content } }] }),
       { status: 200, headers: { "content-type": "application/json" } },

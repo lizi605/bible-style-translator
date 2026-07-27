@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildCardDownloadFilename } from "../lib/cardDownload";
+import {
+  buildCardDownloadFilename,
+  wrapMeasuredCardText,
+} from "../lib/cardDownload";
 
 test("builds distinct scripture card filenames for repeated exports", () => {
   const first = buildCardDownloadFilename(
@@ -35,4 +38,14 @@ test("sanitizes level titles in card download filenames", () => {
 
   assert.equal(filename.startsWith("圣经文体翻译器-方舟-20260703-005012-"), true);
   assert.equal(filename.endsWith(".png"), true);
+});
+
+test("card wrapping never leaves Chinese punctuation at the start of a line", () => {
+  const lines = wrapMeasuredCardText(
+    "瑞斯得了肺炎，一病不起，最终去世了。伊莉莎带着婴儿离开家族。",
+    10,
+    (value) => [...value].length,
+  );
+  assert.ok(lines.length > 2);
+  assert.ok(lines.every((line) => !/^[，。！？；：、）》】〕〉”’]/u.test(line)));
 });

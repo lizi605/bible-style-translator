@@ -19,6 +19,7 @@ export const REFLECTION_RELATIONS = [
   "time_and_season",
   "speech_truth",
   "loss_and_gain",
+  "inherited_responsibility",
   "neutral_record",
 ] as const;
 
@@ -250,6 +251,16 @@ const STORY_REFLECTION_SKELETONS: readonly ReflectionSkeleton[] = [
     famousness: 100,
     render: (reflection) =>
       `愿${actorOf(reflection)}所行的${actionClause(behaviorOf(reflection))}坚立在众人面前，如同${outcomeClause(outcomeOf(reflection))}已经坚立。`,
+  },
+  {
+    id: "child-not-bear-parent-guilt",
+    sourceShape: "儿子必不担当父亲的罪孽，父亲也不担当儿子的罪孽。",
+    relations: ["inherited_responsibility"],
+    modes: ["commend", "admonish", "neutral"],
+    polarities: ["positive", "mixed", "neutral"],
+    famousness: 100,
+    keywords: /家族|祖先|父辈|母辈|后代|孩子|儿子|女儿|血脉|罪孽|担当/u,
+    render: () => "儿子必不担当父亲的罪孽，父亲也不担当儿子的罪孽。",
   },
   {
     id: "neutral-record",

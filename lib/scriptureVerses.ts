@@ -69,10 +69,43 @@ function splitLongUnit(value: string): string[] {
   return [left, ...splitLongUnit(right)].filter(Boolean);
 }
 
+function groupLongStoryVerses(segments: string[], sourceLength: number) {
+  if (segments.length <= 6 || sourceLength < 360) return segments;
+  const grouped: string[] = [];
+  let current = "";
+
+  for (const segment of segments) {
+    const combined = `${current}${segment}`;
+    if (current && [...current].length >= 46) {
+      grouped.push(current);
+      current = segment;
+      continue;
+    }
+    if (current && [...combined].length > 94) {
+      grouped.push(current);
+      current = segment;
+      continue;
+    }
+    current = combined;
+  }
+  if (current) grouped.push(current);
+
+  if (
+    grouped.length >= 2 &&
+    [...grouped[grouped.length - 1]].length < 28 &&
+    [...`${grouped[grouped.length - 2]}${grouped[grouped.length - 1]}`].length <= 108
+  ) {
+    const tail = grouped.pop() || "";
+    grouped[grouped.length - 1] += tail;
+  }
+  return grouped;
+}
+
 export function segmentScriptureText(value: string): ScriptureVerse[] {
   const text = value.trim();
   if (!text) return [];
-  const segments = splitSentences(text).flatMap(splitLongUnit).filter(Boolean);
+  const rawSegments = splitSentences(text).flatMap(splitLongUnit).filter(Boolean);
+  const segments = groupLongStoryVerses(rawSegments, [...text].length);
   return segments.map((text, index) => ({ number: index + 1, text }));
 }
 

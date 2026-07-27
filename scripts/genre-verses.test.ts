@@ -191,6 +191,17 @@ test("dialogue verses break after complete quotations, not inside them", () => {
   assert.match(verses[1].text, /^乙回答说/u);
 });
 
+test("long stories group short sentences instead of numbering every sentence", () => {
+  const story = Array.from(
+    { length: 18 },
+    (_, index) => `那时，第${index + 1}件事显明在众人面前，众人就把所看见的记下来。`,
+  ).join("");
+  const verses = segmentScriptureText(story);
+  assert.ok(verses.length < 18);
+  assert.ok(verses.length >= 7);
+  assert.ok(verses.every((verse) => [...verse.text].length <= 108));
+});
+
 const NEIGHBOR_STORY =
   "傍晚，陈明下班回家，看见邻居王叔的电动车倒在雨里，便停下来扶起车，又把散落的菜装回篮子。王叔赶来，说自己急着给生病的妻子送药。陈明说：“你先回去照顾她，这些东西我替你送到楼上。”他冒雨搬完东西，回家时衣服已经湿透。第二天，王叔带着一袋水果来道谢，陈明只收下一只苹果，说邻里之间本该彼此照应。";
 

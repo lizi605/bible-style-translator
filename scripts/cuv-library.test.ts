@@ -15,8 +15,11 @@ import {
 } from "../lib/cuvStoryTemplates";
 import {
   buildSkeletonIdentificationPrompt,
+  groundScriptureSkeletonPlan,
   renderScriptureSkeletonPlan,
 } from "../lib/scriptureSkeletons";
+import { renderStoryReflection } from "../lib/scriptureReflections";
+import { RUIS_STORY_INPUT } from "./fixtures/ruis-story";
 
 test("aphorism skeleton library contains at least 200 distinct usable frames", () => {
   assert.ok(CUV_APHORISM_SKELETONS.length >= 200);
@@ -148,6 +151,49 @@ test("identification prompt requires one evidence-grounded reflection for every 
   assert.match(prompt, /evidence 必须逐字复制原文/u);
   assert.match(prompt, /出现钱不等于贪财/u);
   assert.match(prompt, /故事编排原型/u);
+});
+
+test("family guilt and an innocent child use the inherited-responsibility verse", () => {
+  const result = renderStoryReflection({
+    enabled: true,
+    mode: "neutral",
+    actor: "瑞斯",
+    behavior: "虽生于献祭灵魂的家族却有纯洁的灵魂",
+    outcome: "被伊莉莎带离家族并健康长大",
+    relation: "inherited_responsibility",
+    polarity: "neutral",
+    evidence: ["那婴儿所载却不是恶魔的意志"],
+  });
+  assert.equal(
+    result,
+    "儿子必不担当父亲的罪孽，父亲也不担当儿子的罪孽。",
+  );
+
+  const grounded = groundScriptureSkeletonPlan(
+    {
+      textType: "记事",
+      units: [
+        {
+          kind: "narration",
+          frame: "outcome",
+          actor: "伊莉莎",
+          action: "带着瑞斯离开家族",
+        },
+      ],
+      reflection: {
+        enabled: true,
+        mode: "neutral",
+        actor: "伊莉莎",
+        behavior: "带着瑞斯离开家族",
+        outcome: "瑞斯健康长大",
+        relation: "neutral_record",
+        polarity: "neutral",
+        evidence: ["冒着风险带着他与宝石项链离开了家族"],
+      },
+    },
+    RUIS_STORY_INPUT,
+  );
+  assert.equal(grounded.reflection?.relation, "inherited_responsibility");
 });
 
 test("public-domain full corpus build scanned every stored verse", () => {
