@@ -19,6 +19,9 @@ test("page presents the general Union Version transformer", async () => {
   assert.doesNotMatch(page, /选择改写玩法/);
   assert.match(page, /onClick=\{\(\) => switchDirection\(item\.id\)\}/);
   assert.match(page, /onClick=\{\(\) => setLevel\(item\.id\)\}/);
+  assert.match(page, /new AbortController\(\)/);
+  assert.match(page, /65000/);
+  assert.match(page, /超过 65 秒，已自动停止等待/);
   assert.match(page, /不是《圣经》经文、经文翻译或宗教权威文本/);
 });
 
@@ -30,6 +33,8 @@ test("route uses bounded fact planning followed by scripture-style realization",
   assert.match(route, /parseScriptureSkeletonPlan/);
   assert.match(route, /renderScriptureSkeletonPlan/);
   assert.match(route, /direct_rescue_assessed/);
+  assert.match(route, /const directAttemptLimit = rescueResult \? 1 : 2/);
+  assert.match(route, /系统没有继续反复重写/);
   assert.match(route, /没有返回近似原文的保守稿/);
   assert.match(route, /attempt < 2/);
   assert.match(route, /response_format/);

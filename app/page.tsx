@@ -289,6 +289,8 @@ export default function Home() {
     setCopied(false);
     const nextVariation = regenerate ? variation + 1 : variation;
     if (regenerate) setVariation(nextVariation);
+    const controller = new AbortController();
+    const requestTimeout = window.setTimeout(() => controller.abort(), 65000);
 
     try {
       const response = await fetch("/api/translate", {
@@ -308,6 +310,7 @@ export default function Home() {
           model: apiModel || undefined,
           variation: nextVariation,
         }),
+        signal: controller.signal,
       });
       const payload = (await response.json()) as {
         result?: string;
@@ -328,11 +331,14 @@ export default function Home() {
       setVerses([]);
       setWarning("");
       setError(
-        requestError instanceof Error
+        requestError instanceof DOMException && requestError.name === "AbortError"
+          ? "本次生成超过 65 秒，已自动停止等待。请点击“再写一次”，或缩短输入后重试。"
+          : requestError instanceof Error
           ? requestError.message
           : "网络连接失败，请稍后再试。",
       );
     } finally {
+      window.clearTimeout(requestTimeout);
       setIsLoading(false);
     }
   }

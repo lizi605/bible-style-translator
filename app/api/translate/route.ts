@@ -878,7 +878,7 @@ export async function POST(request: NextRequest) {
             });
           }
 
-          if (factuallySafe && styleAssessment.acceptable && score > rescueScore) {
+          if (factuallySafe && score > rescueScore) {
             rescueScore = score;
             rescueResult = realized;
             rescueIssues = allIssues;
@@ -911,9 +911,10 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      const directAttemptLimit = rescueResult ? 1 : 2;
       for (
         let attempt = 0;
-        attempt < 2 && Date.now() < deadlineAt - 2500;
+        attempt < directAttemptLimit && Date.now() < deadlineAt - 2500;
         attempt += 1
       ) {
         try {
@@ -981,7 +982,7 @@ export async function POST(request: NextRequest) {
               issues: allIssues,
             });
           }
-          if (factuallySafe && styleAssessment.acceptable && score > rescueScore) {
+          if (factuallySafe && score > rescueScore) {
             rescueScore = score;
             rescueResult = generated;
             rescueIssues = allIssues;
@@ -1021,7 +1022,7 @@ export async function POST(request: NextRequest) {
             rescueResult,
             edition,
             "best_effort",
-            `结构化生成未通过，已改用直接生成的最佳版本；${rescueIssues[0] || "个别指标未完全达到目标"}。`,
+            `正文已经生成；${rescueIssues[0] || "个别风格或篇幅指标未完全达到目标"}。系统没有继续反复重写，以免请求长时间停留。`,
           ),
           ...(includeDiagnostics ? { diagnostics: generationDiagnostics } : {}),
         });
